@@ -1,0 +1,153 @@
+---
+title: "CSE3506 Essentials of Data Analytics Project  \nDiagnosing Depression using Motor Activity Score"
+subtitle: "Review 2"
+author: "Adrian Nirmal Andrew, 18BCE1164"
+output: pdf_document
+---
+
+## Dataset used:
+
+The Depression Dataset: https://www.kaggle.com/arashnic/the-depression-dataset
+
+## Tasks Performed:
+
+- Create a basic classifier model to analyze patterns in patients' activity readings and determine whether a patient is depressed or not
+
+## Load libraries:
+
+```{r}
+library(dplyr)
+library(keras)
+```
+
+## Load and preprocess activity data:
+
+### For control group:
+
+```{r}
+#Iterate through file list:
+setwd("./control/")
+controlFiles <- list.files()
+controlActivity = list()
+for(cFile in controlFiles) {
+	#Read CSV data:
+	tempCont <- read.csv(cFile)
+	#Split data day-wise:
+	tempDays <- tempCont %>% group_split(date)
+	#Keep only complete day records:
+	recLen <- sapply(tempDays, nrow)
+	tempDays <- tempDays[-which(recLen < max(recLen))]
+	#Iteratively add to controlActivity:
+	for(i in 1:length(tempDays)) {
+		controlActivity <- append(controlActivity, list(tempDays[[i]]$activity))
+	}
+}
+#Create data frame:
+controlFrame <- data.frame(row.names = c(1:length(controlActivity)))
+controlFrame$activity <- controlActivity
+#Add class labels (ClassND = Not Depressed, ClassD = Depressed)
+controlFrame$ClassND <- rep(1, length(controlActivity))
+controlFrame$ClassD <- rep(0, length(controlActivity))
+```
+
+### For condition group:
+
+```{r}
+#Iterate through file list:
+setwd("./condition/")
+conditionFiles <- list.files()
+conditionActivity = list()
+for(cFile in conditionFiles) {
+	#Read CSV data:
+	tempCont <- read.csv(cFile)
+	#Split data day-wise:
+	tempDays <- tempCont %>% group_split(date)
+	#Keep only complete day records:
+	recLen <- sapply(tempDays, nrow)
+	tempDays <- tempDays[-which(recLen < max(recLen))]
+	#Iteratively add to conditionActivity:
+	for(i in 1:length(tempDays)) {
+		conditionActivity <- append(conditionActivity, list(tempDays[[i]]$activity))
+	}
+}
+#Create data frame:
+conditionFrame <- data.frame(row.names = c(1:length(conditionActivity)))
+conditionFrame$activity <- conditionActivity
+#Add class labels (ClassND = Not Depressed, ClassD = Depressed)
+conditionFrame$ClassND <- rep(0, length(conditionActivity))
+conditionFrame$ClassD <- rep(1, length(conditionActivity))
+```
+
+Checking the data content:
+
+```{r}
+length(controlActivity)
+head(controlActivity[[1]])
+```
+
+```{r}
+length(conditionActivity)
+head(conditionActivity[[1]])
+```
+
+Hence, we have 670 complete records in the control group and 359 in the condition group. All of them have exactly 1440 entries each.
+
+### Concatenate and split data:
+
+```{r}
+set.seed(1164)
+#Ensure that there is an even split in the data:
+controlFrame <- controlFrame[trainIndex <- sample(seq_len(floor(nrow(controlFrame) / 2)), floor(nrow(controlFrame) / 2)),]
+#Combine dataframes
+totalFrame <- rbind(conditionFrame, controlFrame)
+#Randomize
+totalFrame <- totalFrame[sample(1:nrow(totalFrame)),]
+head(totalFrame, 10)
+#Split data 80:20
+trainIndex <- sample(seq_len(nrow(totalFrame)), floor(0.8 * nrow(totalFrame)))
+trainData <- totalFrame[trainIndex,]
+testData <- totalFrame[-trainIndex,]
+#Convert data to matrix:
+totalX <- t(do.call("cbind", totalFrame$activity))
+totalY <- cbind(totalFrame$ClassND, totalFrame$ClassD)
+colnames(totalY) <- c("ND", "D")
+
+trainX <- t(do.call("cbind", trainData$activity))
+trainY <- cbind(trainData$ClassND, trainData$ClassD)
+colnames(trainY) <- c("ND", "D")
+```
+
+## Creating Classifier Model:
+
+### Define model:
+
+```{r}
+#Create and fit model:
+model <- keras_model_sequential()
+model %>% layer_reshape(input_shape = c(NULL, 1440), target_shape = c(1440, 1)) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 16, kernel_size = 10, strides = 1, activation = 'relu', activity_regularizer = regularizer_l1(0.00015)) %>%
+	layer_average_pooling_1d(pool_size = 11) %>% layer_dropout(0.25) %>% layer_batch_normalization() %>%
+	layer_conv_1d(filters = 8, kernel_size = 7, strides = 1, activation = 'relu', activity_regularizer = regularizer_l1(0.00015)) %>% layer_average_pooling_1d(pool_size = 5) %>% layer_dropout(0.2) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 4, kernel_size = 5, strides = 1, activation = 'relu', activity_regularizer = regularizer_l1(0.00015)) %>% layer_average_pooling_1d(pool_size = 4) %>% layer_dropout(0.15) %>%
+	layer_batch_normalization() %>% layer_dense(4, activation = 'relu') %>% layer_flatten() %>%
+	layer_dense(2, activation = 'sigmoid') %>%
+	layer_reshape(input_shape = c(NULL, 1, 2), target_shape = c(2, NULL))
+model %>% compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = c('accuracy'))
+```
+
+### Load saved model:
+
+```{r}
+model %>% fit(x = totalX, y = totalY, validation_split = 0.2, epochs = 1000, batch_size = 18, verbose = 1)
+#model = load_model_hdf5("best_73_055.hdf5")
+```
+
+### Validate model:
+
+```{r}
+model %>% evaluate(totalX, totalY)
+```
+
+## Results and Model Performance:
