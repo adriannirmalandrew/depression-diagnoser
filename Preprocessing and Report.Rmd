@@ -1,0 +1,225 @@
+## Dataset used:
+
+The Depression Dataset: https://www.kaggle.com/arashnic/the-depression-dataset
+
+## Tasks Performed:
+
+- Create two classifier models, using simple Logistic Regression, then a 1D Convolutional Neural Network to analyze patterns in patients' activity readings and determine whether a patient is depressed or not
+
+## Load libraries:
+
+```{r}
+library(dplyr)
+library(keras)
+```
+
+## Load and preprocess activity data:
+
+- The activity data is provided as lists of time-stamped activity level data for patients in each category
+
+- 1440 Entries per day are taken (number of days different for each patient)
+
+- Data for each day is converted into 1x1440 matrix form for training
+
+- The dataset is then shuffled before use
+
+### For control group:
+
+```{r}
+#Iterate through file list:
+setwd("./control/")
+controlFiles <- list.files()
+controlActivity = list()
+for(cFile in controlFiles) {
+	#Read CSV data:
+	tempCont <- read.csv(cFile)
+	#Split data day-wise:
+	tempDays <- tempCont %>% group_split(date)
+	#Keep only complete day records:
+	recLen <- sapply(tempDays, nrow)
+	tempDays <- tempDays[-which(recLen < max(recLen))]
+	#Iteratively add to controlActivity:
+	for(i in 1:length(tempDays)) {
+		controlActivity <- append(controlActivity, list(tempDays[[i]]$activity))
+	}
+}
+#Create data frame:
+controlFrame <- data.frame(row.names = c(1:length(controlActivity)))
+controlFrame$activity <- controlActivity
+#Add class labels (ClassND = Not Depressed, ClassD = Depressed)
+controlFrame$ClassND <- rep(1, length(controlActivity))
+controlFrame$ClassD <- rep(0, length(controlActivity))
+```
+
+### For condition group:
+
+```{r}
+#Iterate through file list:
+setwd("./condition/")
+conditionFiles <- list.files()
+conditionActivity = list()
+for(cFile in conditionFiles) {
+	#Read CSV data:
+	tempCont <- read.csv(cFile)
+	#Split data day-wise:
+	tempDays <- tempCont %>% group_split(date)
+	#Keep only complete day records:
+	recLen <- sapply(tempDays, nrow)
+	tempDays <- tempDays[-which(recLen < max(recLen))]
+	#Iteratively add to conditionActivity:
+	for(i in 1:length(tempDays)) {
+		conditionActivity <- append(conditionActivity, list(tempDays[[i]]$activity))
+	}
+}
+#Create data frame:
+conditionFrame <- data.frame(row.names = c(1:length(conditionActivity)))
+conditionFrame$activity <- conditionActivity
+#Add class labels (ClassND = Not Depressed, ClassD = Depressed)
+conditionFrame$ClassND <- rep(0, length(conditionActivity))
+conditionFrame$ClassD <- rep(1, length(conditionActivity))
+```
+
+Checking the data content:
+
+```{r}
+length(controlActivity)
+head(controlActivity[[1]])
+```
+
+```{r}
+length(conditionActivity)
+head(conditionActivity[[1]])
+```
+
+Hence, we have 670 complete records in the control group and 359 in the condition group. All of them have exactly 1440 entries each.
+
+### Concatenate and split data:
+
+```{r}
+set.seed(1164)
+#Combine dataframes
+totalFrame <- rbind(conditionFrame, controlFrame)
+#Randomize
+totalFrame <- totalFrame[sample(1:nrow(totalFrame)),]
+#Convert data to matrix form:
+totalX <- t(do.call("cbind", totalFrame$activity))
+totalY <- cbind(totalFrame$ClassND, totalFrame$ClassD)
+colnames(totalY) <- c("ND", "D")
+```
+
+## Creating Classifier Model:
+
+- The model takes an entire day's activity readings as input, analyzes it and gives an output for each class
+
+- Sigmoid function ensures that output is a value between 0 and 1
+
+- Two models will be analyzed: Logistic Regression and 1D Convolution
+
+### Select random data sample for testing:
+
+```{r}
+test_indices <- sample(1:nrow(totalFrame))[1:30]
+```
+
+### Define Logistic Regresion model:
+
+```{r}
+library(caret)
+lrTrain <- sample(1:nrow(totalFrame))[1:700]
+logReg <- glm(formula = totalY[lrTrain, 2] ~ ., family='binomial',
+			  data = as.data.frame(totalX[lrTrain,]))
+```
+
+### Plot responses on training set:
+
+```{r}
+logTrain <- predict(logReg, type='response')
+plot(logTrain)
+```
+
+The model has fitted the data very closely, giving responses very close to either 0 or 1.
+
+### Plot responses on test dataset:
+
+```{r}
+t1 <- c(1:nrow(totalFrame))
+t1 <- t1[!t1 %in% lrTrain]
+logTest <- predict(logReg, newdata = as.data.frame(totalX[t1,]), type = 'response')
+plot(logTest)
+#Threshold = 0.5
+logTest <- ifelse(logTest > 0.5, 1, 0)
+confusionMatrix(table(totalY[t1,2], logTest))
+```
+
+While the model predicts Test data results with similar "confidence", most of the predictions made are wrong. Hence, we infer that the model is extremely overfitted and cannot be used for classification.
+
+### Define convolution model:
+
+```{r eval=FALSE}
+#Create and fit model:
+model <- keras_model_sequential()
+model %>% layer_reshape(input_shape = c(NULL, 1440), target_shape = c(1440, 1)) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 16, kernel_size = 10, strides = 1, activation = 'relu',
+				  activity_regularizer = regularizer_l1(0.00015)) %>%
+	layer_average_pooling_1d(pool_size = 11) %>% layer_dropout(0.25) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 8, kernel_size = 7, strides = 1, activation = 'relu', 
+				  activity_regularizer = regularizer_l1(0.00015)) %>%
+	layer_average_pooling_1d(pool_size = 5) %>% layer_dropout(0.2) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 4, kernel_size = 5, strides = 1, activation = 'relu', 
+				  activity_regularizer = regularizer_l1(0.00015)) %>%
+	layer_average_pooling_1d(pool_size = 4) %>% layer_dropout(0.15) %>%
+	layer_batch_normalization() %>% layer_dense(4, activation = 'relu') %>%
+	layer_flatten() %>% layer_dense(2, activation = 'sigmoid') %>%
+	layer_reshape(input_shape = c(NULL, 1, 2), target_shape = c(2, NULL))
+model %>% compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = c('accuracy'))
+model %>% fit(x = totalX, y = totalY, validation_split = 0.2, epochs = 1000, batch_size = 18, verbose = 1)
+```
+
+### Load saved model:
+
+```{r}
+model = load_model_hdf5("best_80_043.hdf5")
+```
+
+### Model summary:
+
+```{r}
+summary(model)
+```
+
+### Evaluate model on whole training dataset:
+
+```{r}
+model %>% evaluate(totalX, totalY)
+```
+
+### Evaluate model on random data sample:
+
+```{r}
+model %>% evaluate(totalX[test_indices,], totalY[test_indices,])
+```
+
+## Sample predictions, comparing to expected results:
+
+- train_ND and train_D are the expected results, denoting "Not Depressed" and "Depressed" respectively
+
+- pred_ND and pred_D are the predicted results
+
+```{r}
+resFrame <- data.frame()
+for(i in test_indices) {
+	tempRes <- model %>% predict(matrix(totalX[i,], ncol = 1440))
+	resFrame <- rbind(resFrame, tempRes)
+}
+colnames(resFrame) <- c("pred_ND", "pred_D")
+resFrame$train_ND <- totalY[test_indices, 1]
+resFrame$train_D <- totalY[test_indices, 2]
+print(resFrame)
+```
+
+## Conclusion:
+
+Classifying a patient as depressed or not, using actigraph readings alone, can be performed with reasonable accuracy using a 1D Convolutional Neural Network.
