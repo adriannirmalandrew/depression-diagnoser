@@ -160,19 +160,19 @@ While the model predicts Test data results with similar "confidence", most of th
 model <- keras_model_sequential()
 model %>% layer_reshape(input_shape = c(NULL, 1440), target_shape = c(1440, 1)) %>%
 	layer_batch_normalization() %>%
-	layer_conv_1d(filters = 16, kernel_size = 10, strides = 1, activation = 'relu',
-				  activity_regularizer = regularizer_l1(0.00015)) %>%
-	layer_average_pooling_1d(pool_size = 11) %>% layer_dropout(0.25) %>%
-	layer_batch_normalization() %>%
-	layer_conv_1d(filters = 8, kernel_size = 7, strides = 1, activation = 'relu', 
-				  activity_regularizer = regularizer_l1(0.00015)) %>%
-	layer_average_pooling_1d(pool_size = 5) %>% layer_dropout(0.2) %>%
-	layer_batch_normalization() %>%
-	layer_conv_1d(filters = 4, kernel_size = 5, strides = 1, activation = 'relu', 
-				  activity_regularizer = regularizer_l1(0.00015)) %>%
+	layer_conv_1d(filters = 2, kernel_size = 5, strides = 2, activation = 'relu',
+				  activity_regularizer = regularizer_l2(0.0002)) %>%
 	layer_average_pooling_1d(pool_size = 4) %>% layer_dropout(0.15) %>%
-	layer_batch_normalization() %>% layer_dense(4, activation = 'relu') %>%
-	layer_flatten() %>% layer_dense(2, activation = 'sigmoid') %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 2, kernel_size = 4, strides = 1, activation = 'relu', 
+				  activity_regularizer = regularizer_l1(0.0002)) %>%
+	layer_average_pooling_1d(pool_size = 4) %>% layer_dropout(0.1) %>%
+	layer_batch_normalization() %>%
+	layer_conv_1d(filters = 4, kernel_size = 6, strides = 1, activation = 'relu', 
+				  activity_regularizer = regularizer_l1(0.0002)) %>%
+	layer_average_pooling_1d(pool_size = 4) %>% layer_dropout(0.1) %>%
+	layer_batch_normalization() %>% layer_dense(9, activation = 'relu') %>%
+	layer_flatten() %>% layer_dense(2, activation = 'softmax') %>%
 	layer_reshape(input_shape = c(NULL, 1, 2), target_shape = c(2, NULL))
 model %>% compile(loss = 'categorical_crossentropy', optimizer = 'adam', metrics = c('accuracy'))
 model %>% fit(x = totalX, y = totalY, validation_split = 0.2, epochs = 1000, batch_size = 18, verbose = 1)
